@@ -80,3 +80,4 @@ for epoch in pbar:
         model.train()
 context = torch.zeros((1, 1), dtype=torch.long, device="mps")
 print(tokenizer.decode(model.generate(context, max_new_tokens=100, block_size=Config.block_size)[0].tolist()))
+torch.save(model.state_dict(), "model.pt")
