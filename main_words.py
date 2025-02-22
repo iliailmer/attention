@@ -5,9 +5,9 @@ import numpy as np
 import torch
 from tqdm.auto import tqdm
 
-from src.tokenization import Tokenizer
+from src.tokenization import TokenizerByWord as Tokenizer
 from src.transformer import GPTModel
-from src.utils import read_data, tinyshakespeare_batch
+from src.utils import read_data, tinyshakespeare_batch_words as tinyshakespeare_batch
 
 
 def set_seed(seed: int):

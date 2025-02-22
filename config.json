@@ -1,0 +1,13 @@
+{
+  "embedding_size": 384,
+  "block_size": 128,
+  "num_heads": 6,
+  "num_blocks": 6,
+  "lr": 0.00025,
+  "wd": 0.01,
+  "batch_size": 64,
+  "n_epochs": 5000,
+  "device": "mps",
+  "eval_every": 500,
+  "num_eval_steps": 200
+}
