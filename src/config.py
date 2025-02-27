@@ -1,7 +1,7 @@
-from pydantic import BaseModel
+import json
 
 
-class Config(BaseModel):
+class Config:
     embedding_size = 384
     block_size = 128
     num_heads = 6
@@ -14,3 +14,9 @@ class Config(BaseModel):
     eval_every = n_epochs // 10
     num_eval_steps = 200
     accumulate_grad = 4
+
+
+def save_config(Config, fname: str = "config.json"):
+    conf_dict = {key: getattr(Config, key) for key in dir(Config)}
+    with open(fname, "w") as f:
+        json.dump(conf_dict, f, indent=4)

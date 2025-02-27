@@ -8,6 +8,7 @@ from tqdm.auto import tqdm
 from src.tokenization import TokenizerByWord as Tokenizer
 from src.transformer import GPTModel
 from src.utils import read_data, tinyshakespeare_batch_words as tinyshakespeare_batch
+from src.config import Config, save_config
 
 
 def set_seed(seed: int):
@@ -17,21 +18,6 @@ def set_seed(seed: int):
 
 
 set_seed(42)
-
-
-class Config:
-    embedding_size = 384
-    block_size = 128
-    num_heads = 6
-    num_blocks = 6
-    lr = 1e-5
-    wd = 1e-2
-    batch_size = 16
-    n_epochs = 5000
-    device = "mps"
-    eval_every = n_epochs // 10
-    num_eval_steps = 200
-    accumulate_grad = 4
 
 
 if __name__ == "__main__":
@@ -88,5 +74,4 @@ if __name__ == "__main__":
         context = torch.zeros((1, 1), dtype=torch.long, device="mps")
         print(tokenizer.decode(model.generate(context, max_new_tokens=500, block_size=Config.block_size)[0].tolist()))
     torch.save(model.state_dict(), "model_w.pt")
-    with open("config.json", "w") as f:
-        f.write(json.dumps(Config, default=lambda x: x.__dict__))
+    save_config(Config, "config_w.json")
