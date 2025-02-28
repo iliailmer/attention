@@ -6,8 +6,7 @@ from src.tokenization import TokenizerByWord as Tokenizer
 from src.transformer import GPTModel
 from src.utils import read_data
 
-
-with open("config.json") as f:
+with open("config_w.json") as f:
     Config = json.load(f)
 text = read_data()
 tokenizer = Tokenizer(from_text=text)

@@ -1,10 +1,10 @@
 import time
-from math import ceil
+from typing import Optional
 
 import numpy as np
 import torch
 import torch.nn.functional as F
-from torch.profiler import profile
+from torch import Tensor, nn
 from tqdm.auto import tqdm
 
 
@@ -12,7 +12,7 @@ def flash_attention(q, k, v, mask=None, is_decoder=False, tril=None, block_size=
     """
     Flash Attention: Computes attention using memory-efficient tiling.
     """
-    batch_size, seq_len, head_dim = q.shape
+    _, seq_len, head_dim = q.shape
     output = torch.zeros_like(q)  # Stores final results
 
     # Iterate through the sequence in blocks
@@ -26,7 +26,7 @@ def flash_attention(q, k, v, mask=None, is_decoder=False, tril=None, block_size=
         if mask is not None:
             scores = scores.masked_fill(mask[i : i + block_size, i : i + block_size] == 0, float("-inf"))
         elif is_decoder:
-            scores = scores.masked_fill(tril[i : i + block_size, i : i + block_size] == 0, float("-inf"))
+            scores = scores.masked_fill(tril[i : i + block_size, i : i + block_size] == 0, float("-inf"))  # pyright: ignore
         # Compute online softmax (normalize per tile)
         scores = scores - scores.max(dim=-1, keepdim=True).values  # Stabilize softmax
         scores = scores.exp()
@@ -38,14 +38,14 @@ def flash_attention(q, k, v, mask=None, is_decoder=False, tril=None, block_size=
     return output
 
 
-class FlashAttentionMPS(torch.nn.Module):
-    def __init__(self, embed_dim, num_heads, is_decoder=False, block_size=128):
-        super().__init__()
+class FlashAttentionMPS(nn.Module):
+    def __init__(self, embed_dim, num_heads, context_size, is_decoder=False, block_size=128):
+        super().__init__()  # block here is the block of flash attention portion when running the computations
         self.num_heads = num_heads
         self.block_size = block_size
         self.qkv_proj = torch.nn.Linear(embed_dim, 3 * embed_dim, bias=False)
         self.out_proj = torch.nn.Linear(embed_dim, embed_dim)
-        self.register_buffer("tril", torch.tril(torch.ones(block_size, block_size)))  # used in masking)
+        self.register_buffer("tril", torch.tril(torch.ones(context_size, context_size)))  # used in masking)
         self.is_decoder = is_decoder
 
     def forward(self, x, mask=None):
@@ -63,6 +63,168 @@ class FlashAttentionMPS(torch.nn.Module):
         return self.out_proj(attn_output)
 
 
+# NOTE: Batch x SentenceLength => Embedding => Batch x SentenceLength x EmbeddingSize
+class MultiHeadAttention(nn.Module):
+    def __init__(self, embedding_size: int, head_size: int, block_size: int, num_heads: int):
+        super().__init__()
+        self.heads = nn.ModuleList(
+            [FlashAttentionMPS(embedding_size, head_size, context_size=block_size) for _ in range(num_heads)]
+        )
+        self.proj = nn.Linear(head_size * num_heads, embedding_size)
+        self.dropout = nn.Dropout(0.2)
+
+    def forward(self, x: Tensor, mask: Optional[Tensor] = None) -> Tensor:
+        x = torch.cat([h(x, mask) for h in self.heads], dim=-1)  # NOTE: Batch x SentenceLength x HeadSize*num_heads
+        x = self.proj(x)  # NOTE: Batch x SentenceLength x embedding_size
+        return self.dropout(x)
+
+
+class SelfAttentionEncoder(FlashAttentionMPS):
+    def __init__(self, embedding_size: int, head_size: int, block_size: int):
+        super().__init__(embedding_size, head_size, context_size=block_size, is_decoder=False)
+
+    def forward(self, x: Tensor, mask: Optional[Tensor] = None) -> Tensor:
+        return super().forward(x, mask)
+
+
+class MultiHeadEncoder(nn.Module):
+    def __init__(self, embedding_size: int, head_size: int, block_size: int, num_heads: int):
+        super().__init__()
+        self.heads = nn.ModuleList(
+            [SelfAttentionEncoder(embedding_size, head_size, block_size) for _ in range(num_heads)]
+        )
+        self.proj = nn.Linear(num_heads * head_size, embedding_size)
+        self.dropout = nn.Dropout(0.2)
+
+    def forward(self, x: Tensor, mask: Optional[Tensor] = None) -> Tensor:
+        x = torch.cat([h(x, mask) for h in self.heads], dim=-1)
+        x = self.proj(x)
+        return self.dropout(x)
+
+
+class SelfAttentionDecoder(FlashAttentionMPS):
+    def __init__(self, embedding_size: int, head_size: int, block_size: int):
+        super().__init__(embedding_size, head_size, context_size=block_size, is_decoder=True)
+
+    def forward(self, x: Tensor, mask: Optional[Tensor] = None) -> Tensor:
+        return super().forward(x, mask)
+
+
+class MultiHeadDecoder(nn.Module):
+    def __init__(self, embedding_size: int, head_size: int, block_size: int, num_heads: int):
+        super().__init__()
+        self.heads = nn.ModuleList(
+            [SelfAttentionDecoder(embedding_size, head_size, block_size) for _ in range(num_heads)]
+        )
+        self.proj = nn.Linear(num_heads * head_size, embedding_size)
+        self.dropout = nn.Dropout(0.2)
+
+    def forward(self, x: Tensor, mask: Optional[Tensor] = None) -> Tensor:
+        x = torch.cat([h(x, mask) for h in self.heads], dim=-1)
+        x = self.proj(x)
+        return self.dropout(x)
+
+
+class EncoderBlock(nn.Module):
+    def __init__(self, embedding_size: int, head_size: int, block_size: int, num_enc_heads: int, n_hidden: int = 128):
+        super().__init__()
+        self.encoder = MultiHeadEncoder(embedding_size, head_size, block_size, num_enc_heads)
+        self.ffn = nn.Sequential(
+            nn.Linear(embedding_size, n_hidden),
+            nn.ReLU(),
+            nn.Linear(n_hidden, embedding_size),
+        )
+        self.layer_norm = nn.LayerNorm(embedding_size)
+
+    def forward(self, x: Tensor, mask: Optional[Tensor] = None) -> Tensor:
+        x = x + self.encoder(x, mask)
+        x = self.layer_norm(x)
+        x = x + self.ffn(x)
+        x = self.layer_norm(x)
+        return x
+
+
+class DecoderBlock(nn.Module):
+    def __init__(self, embedding_size: int, head_size: int, block_size: int, num_heads: int, n_hidden: int = 128):
+        super().__init__()
+        self.decoder = MultiHeadDecoder(embedding_size, head_size, block_size, num_heads)
+        self.mha = MultiHeadAttention(embedding_size, head_size, block_size, num_heads)
+        self.layer_norm_1 = nn.LayerNorm(embedding_size)
+        self.layer_norm_2 = nn.LayerNorm(embedding_size)
+        self.layer_norm_3 = nn.LayerNorm(embedding_size)
+        self.ffn = nn.Sequential(
+            nn.Linear(embedding_size, n_hidden),
+            nn.ReLU(),
+            nn.Linear(n_hidden, embedding_size),
+        )
+
+    def forward(self, x: Tensor, mask: Optional[Tensor] = None, enc_x: Optional[Tensor] = None) -> Tensor:
+        x = x + self.decoder(x, mask)
+        x = self.layer_norm_1(x)
+        if enc_x is not None:
+            # NOTE: Decoder cross-attention should NOT concatenate x and enc_x.
+            # Instead, x (query) attends to enc_x (key & value) in MultiHeadAttention
+            # if enc_x is not None:
+            # x_residual = x
+            # x = self.mha(q=x, k=enc_x, v=enc_x)  # Query attends to encoder output
+            # x = self.layer_norm_2(x + x_residual)
+
+            x = torch.cat([x, enc_x], dim=1)
+            x = self.mha(x)
+            x = x + self.layer_norm_2(x)
+        x = x + self.ffn(x)
+        x = self.layer_norm_3(x)
+        return x
+
+
+class GPTModel(nn.Module):
+    def __init__(
+        self, vocab_size: int, embedding_size: int, head_size: int, block_size: int, num_heads: int, num_blocks: int
+    ) -> None:
+        super().__init__()
+        self.t_emembedding = nn.Embedding(vocab_size, embedding_size)
+        self.p_embedding = nn.Embedding(block_size, embedding_size)
+        self.decoder_blocks = nn.Sequential(
+            *[
+                DecoderBlock(embedding_size, head_size, block_size, num_heads=num_heads, n_hidden=4 * num_heads)
+                for _ in range(num_blocks)
+            ]
+        )
+        self.layer_norm = nn.LayerNorm(embedding_size)
+        self.final = nn.Linear(embedding_size, vocab_size)
+        self.apply(self._init_weights)
+
+    def _init_weights(self, module):
+        if isinstance(module, nn.Linear):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            if module.bias is not None:
+                torch.nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.Embedding):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+
+    def forward(self, x, targets=None):
+        _, T = x.shape
+        x = self.t_emembedding(x) + self.p_embedding(torch.arange(T, device=x.device))
+        x = self.decoder_blocks(x)
+        x = self.layer_norm(x)
+        logits = self.final(x)
+        loss = None
+        if targets is not None:
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
+        return logits, loss
+
+    def generate(self, idx, max_new_tokens=256, block_size=128):
+        for _ in range(max_new_tokens):
+            idx_cond = idx[:, -block_size:]  # last block
+            logits, _ = self(idx_cond)
+            logits = logits[:, -1, :]  # NOTE: this is the last token in the sequence
+            probs = F.softmax(logits, dim=-1)
+            idx_next = torch.multinomial(probs, 1).to("mps")
+            idx = torch.cat((idx, idx_next), dim=1)
+        return idx
+
+
+# benchmarking routines
 def regular_attention(q, k, v):
     # simplified attention step, no masking
     scores = q @ k.transpose(-2, -1) / torch.sqrt(torch.tensor(k.shape[-1]))  # B x SL x SL

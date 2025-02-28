@@ -41,14 +41,15 @@ class TokenizerByWord:
                 raise ValueError("No vocab or text provided")
         self.stoi["\n"] = self.vocab_size + 1
         self.itos[self.vocab_size + 1] = "\n"
+        self.vocab_size += 1
 
         self.stoi["<NONE>"] = self.vocab_size + 1
         self.itos[self.vocab_size + 1] = "<NONE>"
         self.vocab_size += 1
 
     def encode(self, text: str) -> Tensor:
-        text_ = text.replace("\n", " ").split()
+        text_ = text.split()
         return Tensor([self.stoi.get(c, self.stoi["<NONE>"]) for c in text_]).long()
 
     def decode(self, tokens) -> str:
-        return " ".join([self.itos[int(token)] for token in tokens])
+        return "".join([self.itos[int(token)] for token in tokens])
