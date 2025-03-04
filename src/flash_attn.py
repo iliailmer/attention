@@ -25,7 +25,12 @@ def flash_attention(q: Tensor, k: Tensor, v: Tensor, mask=None, is_decoder=False
         if mask is not None:
             scores = scores.masked_fill(mask[:, i : i + block_size, i : i + block_size] == 0, float("-inf"))
         elif is_decoder and tril is not None:
-            scores = scores.masked_fill(tril[i : i + block_size, i : i + block_size] == 0, float("-inf"))
+            if block_size > scores.shape[-1]:
+                scores = scores.masked_fill(
+                    tril[i : i + scores.shape[-1], i : i + scores.shape[-1]] == 0, float("-inf")
+                )
+            else:
+                scores = scores.masked_fill(tril[i : i + block_size, i : i + block_size] == 0, float("-inf"))
         # Compute online softmax (normalize per tile)
         scores = scores - scores.max(dim=-1, keepdim=True).values  # Stabilize softmax
         scores = scores.exp()

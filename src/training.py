@@ -2,6 +2,7 @@ import torch
 from tqdm.auto import tqdm
 
 from src.tokenization import Tokenizer, TokenizerByWord
+from src.optimizer import Muon
 from src.transformer import GPTModel
 from src.flash_attn import GPTModel as GPTModelFA
 from src.utils import read_data, tinyshakespeare_batch, tinyshakespeare_batch_words
