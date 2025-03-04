@@ -15,6 +15,8 @@ class Config:
         device="mps",
         num_eval_steps=200,
         accumulate_grad=4,
+        use_flash=False,
+        **kwargs,
     ):
         self.embedding_size = embedding_size
         self.block_size = block_size
@@ -28,6 +30,7 @@ class Config:
         self.eval_every = self.n_epochs // 10
         self.num_eval_steps = num_eval_steps
         self.accumulate_grad = accumulate_grad
+        self.use_flash = use_flash
 
     def save(self, fname: str = "config.json"):
         conf_dict = self.__dict__

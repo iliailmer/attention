@@ -8,29 +8,29 @@ from torch import Tensor, nn
 from tqdm.auto import tqdm
 
 
-def flash_attention(q, k, v, mask=None, is_decoder=False, tril=None, block_size=128):
+def flash_attention(q: Tensor, k: Tensor, v: Tensor, mask=None, is_decoder=False, tril=None, block_size=128):
     """
     Flash Attention: Computes attention using memory-efficient tiling.
     """
-    _, seq_len, head_dim = q.shape
+    batch_size, seq_len, head_dim = q.shape
     output = torch.zeros_like(q)  # Stores final results
 
-    # Iterate through the sequence in blocks
     for i in range(0, seq_len, block_size):
-        q_block = q[:, i : i + block_size]  # Load tile of Q
-        k_block = k[:, i : i + block_size]  # Load tile of K
-        v_block = v[:, i : i + block_size]  # Load tile of V
+        q_block = q[:, i : i + block_size]
+        k_block = k[:, i : i + block_size]
+        v_block = v[:, i : i + block_size]
 
         # Compute QK^T only for this block
         scores = torch.matmul(q_block, k_block.transpose(-2, -1)) / (head_dim**0.5)
         if mask is not None:
-            scores = scores.masked_fill(mask[i : i + block_size, i : i + block_size] == 0, float("-inf"))
-        elif is_decoder:
-            scores = scores.masked_fill(tril[i : i + block_size, i : i + block_size] == 0, float("-inf"))  # pyright: ignore
+            scores = scores.masked_fill(mask[:, i : i + block_size, i : i + block_size] == 0, float("-inf"))
+        elif is_decoder and tril is not None:
+            scores = scores.masked_fill(tril[i : i + block_size, i : i + block_size] == 0, float("-inf"))
         # Compute online softmax (normalize per tile)
         scores = scores - scores.max(dim=-1, keepdim=True).values  # Stabilize softmax
         scores = scores.exp()
-        scores = scores / scores.sum(dim=-1, keepdim=True)
+        scores_sum = scores.sum(dim=-1, keepdim=True)
+        scores = scores / (scores_sum + 1e-6)  # Avoid division by zero
 
         # Compute weighted sum
         output[:, i : i + block_size] = torch.matmul(scores, v_block)
@@ -39,26 +39,25 @@ def flash_attention(q, k, v, mask=None, is_decoder=False, tril=None, block_size=
 
 
 class FlashAttentionMPS(nn.Module):
-    def __init__(self, embed_dim, num_heads, context_size, is_decoder=False, block_size=128):
-        super().__init__()  # block here is the block of flash attention portion when running the computations
-        self.num_heads = num_heads
+    def __init__(self, embed_dim, head_size, context_size, is_decoder=False, block_size=128):
+        super().__init__()
         self.block_size = block_size
-        self.qkv_proj = torch.nn.Linear(embed_dim, 3 * embed_dim, bias=False)
-        self.out_proj = torch.nn.Linear(embed_dim, embed_dim)
-        self.register_buffer("tril", torch.tril(torch.ones(context_size, context_size)))  # used in masking)
+        self.head_size = head_size
+        self.qkv_proj = torch.nn.Linear(embed_dim, 3 * head_size, bias=False)
+        self.out_proj = torch.nn.Linear(head_size, head_size)
+        self.register_buffer("tril", torch.tril(torch.ones(context_size, context_size)))
         self.is_decoder = is_decoder
 
     def forward(self, x, mask=None):
         batch_size, seq_len, embed_dim = x.shape
-        q, k, v = self.qkv_proj(x).chunk(3, dim=-1)  # Split into Q, K, V
-        q, k, v = [t.view(batch_size, seq_len, self.num_heads, -1) for t in (q, k, v)]
+        q, k, v = self.qkv_proj(x).chunk(3, dim=-1)
 
         attn_output = flash_attention(
             q, k, v, mask=mask, is_decoder=self.is_decoder, tril=self.tril, block_size=self.block_size
         )
 
         # Merge heads
-        attn_output = attn_output.contiguous().view(batch_size, seq_len, -1)
+        attn_output = attn_output.contiguous().view(batch_size, seq_len, -1)  # [batch_size, seq_len, embed_dim]
 
         return self.out_proj(attn_output)
 

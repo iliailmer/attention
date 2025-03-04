@@ -3,7 +3,8 @@ from tqdm.auto import tqdm
 
 from src.tokenization import Tokenizer, TokenizerByWord
 from src.transformer import GPTModel
-from src.utils import read_data, tinyshakespeare_batch
+from src.flash_attn import GPTModel as GPTModelFA
+from src.utils import read_data, tinyshakespeare_batch, tinyshakespeare_batch_words
 from src.config import Config
 
 
@@ -11,14 +12,24 @@ def train_w(config: Config):
     text = read_data()
     tokenizer = TokenizerByWord(from_text=text)
 
-    model = GPTModel(
-        vocab_size=tokenizer.vocab_size,
-        embedding_size=config.embedding_size,
-        head_size=config.embedding_size // config.num_heads,
-        block_size=config.block_size,
-        num_heads=config.num_heads,
-        num_blocks=config.num_blocks,
-    )
+    if config.use_flash:
+        model = GPTModelFA(
+            vocab_size=tokenizer.vocab_size,
+            embedding_size=config.embedding_size,
+            head_size=config.embedding_size // config.num_heads,
+            block_size=config.block_size,
+            num_heads=config.num_heads,
+            num_blocks=config.num_blocks,
+        )
+    else:
+        model = GPTModel(
+            vocab_size=tokenizer.vocab_size,
+            embedding_size=config.embedding_size,
+            head_size=config.embedding_size // config.num_heads,
+            block_size=config.block_size,
+            num_heads=config.num_heads,
+            num_blocks=config.num_blocks,
+        )
     model = model.to(config.device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.lr, weight_decay=config.wd)
 
@@ -29,7 +40,7 @@ def train_w(config: Config):
     model.train()
     try:
         for epoch in pbar:
-            x, y = tinyshakespeare_batch(data_train, config.block_size, config.batch_size, tokenizer)
+            x, y = tinyshakespeare_batch_words(data_train, config.block_size, config.batch_size, tokenizer)
             x = x.to(config.device)
             y = y.to(config.device)
             out, loss = model(x, y)
@@ -46,7 +57,7 @@ def train_w(config: Config):
                         pbar_val = tqdm(range(config.num_eval_steps), leave=None)
                         losses = torch.zeros(config.num_eval_steps)
                         for eval_step in pbar_val:
-                            x, y = tinyshakespeare_batch(data, config.block_size, config.batch_size, tokenizer)
+                            x, y = tinyshakespeare_batch_words(data, config.block_size, config.batch_size, tokenizer)
                             x = x.to(config.device)
                             y = y.to(config.device)
                             out, loss = model(x, y)
@@ -56,6 +67,9 @@ def train_w(config: Config):
                         f"Epoch {epoch} - Training Loss: {loss_dict['train']:.4f} - Val Loss: {loss_dict['val']:.4f}"
                     )
                 model.train()
+        context = torch.zeros((1, 1), dtype=torch.long, device="mps")
+        print(tokenizer.decode(model.generate(context, max_new_tokens=500, block_size=config.block_size)[0].tolist()))
+
     except KeyboardInterrupt:
         model.eval()
         context = torch.zeros((1, 1), dtype=torch.long, device="mps")
@@ -68,14 +82,24 @@ def train_c(config: Config):
     text = read_data()
     tokenizer = Tokenizer(from_text=text)
 
-    model = GPTModel(
-        vocab_size=tokenizer.vocab_size,
-        embedding_size=config.embedding_size,
-        head_size=config.embedding_size // config.num_heads,
-        block_size=config.block_size,
-        num_heads=config.num_heads,
-        num_blocks=config.num_blocks,
-    )
+    if config.use_flash:
+        model = GPTModelFA(
+            vocab_size=tokenizer.vocab_size,
+            embedding_size=config.embedding_size,
+            head_size=config.embedding_size // config.num_heads,
+            block_size=config.block_size,
+            num_heads=config.num_heads,
+            num_blocks=config.num_blocks,
+        )
+    else:
+        model = GPTModel(
+            vocab_size=tokenizer.vocab_size,
+            embedding_size=config.embedding_size,
+            head_size=config.embedding_size // config.num_heads,
+            block_size=config.block_size,
+            num_heads=config.num_heads,
+            num_blocks=config.num_blocks,
+        )
     model = model.to(config.device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.lr, weight_decay=config.wd)
 
