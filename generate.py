@@ -32,5 +32,5 @@ if tokenizer is not None:
     )
     model = model.to(config.device)
     model.load_state_dict(torch.load("model_c.pt"))
-    context = tokenizer.encode("T'was a ni").unsqueeze(0).long().to(config.device)
+    context = tokenizer.encode("T'was a night").unsqueeze(0).long().to(config.device)
     print(tokenizer.decode(model.generate(context, max_new_tokens=500, block_size=config.block_size)[0].tolist()))

@@ -67,15 +67,11 @@ def train_w(config: Config):
                         f"Epoch {epoch} - Training Loss: {loss_dict['train']:.4f} - Val Loss: {loss_dict['val']:.4f}"
                     )
                 model.train()
-        context = torch.zeros((1, 1), dtype=torch.long, device="mps")
-        print(tokenizer.decode(model.generate(context, max_new_tokens=500, block_size=config.block_size)[0].tolist()))
-
+        torch.save(model.state_dict(), "model_w.pt")
+        config.save("config_w.json")
     except KeyboardInterrupt:
-        model.eval()
-        context = torch.zeros((1, 1), dtype=torch.long, device="mps")
-        print(tokenizer.decode(model.generate(context, max_new_tokens=500, block_size=config.block_size)[0].tolist()))
-    torch.save(model.state_dict(), "model_w.pt")
-    config.save("config_w.json")
+        torch.save(model.state_dict(), "model_w.pt")
+        config.save("config_w.json")
 
 
 def train_c(config: Config):
@@ -137,13 +133,9 @@ def train_c(config: Config):
                         f"Epoch {epoch} - Training Loss: {loss_dict['train']:.4f} - Val Loss: {loss_dict['val']:.4f}"
                     )
                 model.train()
-        model.eval()
-        context = torch.zeros((1, 1), dtype=torch.long, device="mps")
-        print(tokenizer.decode(model.generate(context, max_new_tokens=500, block_size=config.block_size)[0].tolist()))
-
+        torch.save(model.state_dict(), "model_w.pt")
+        config.save("config_c.json")
     except KeyboardInterrupt:
         model.eval()
-        context = torch.zeros((1, 1), dtype=torch.long, device="mps")
-        print(tokenizer.decode(model.generate(context, max_new_tokens=500, block_size=config.block_size)[0].tolist()))
-    torch.save(model.state_dict(), "model_w.pt")
-    config.save("config_c.json")
+        torch.save(model.state_dict(), "model_w.pt")
+        config.save("config_c.json")
