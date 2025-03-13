@@ -1,4 +1,5 @@
 import argparse
+from pprint import pprint
 
 from src.config import Config
 from src.utils import set_seed
@@ -14,7 +15,7 @@ parser.add_argument("--config", "-cfg", type=str, help="config file path")
 parser.add_argument("--embedding_size", "-es", type=int, help="embedding size", default=384)
 parser.add_argument("--block_size", "-blk", type=int, help="block size (context length)", default=128)
 parser.add_argument("--num_heads", "-nh", type=int, help="number of heads", default=6)
-parser.add_argument("--num_blocks", "-nb", type=int, help="number of blocks", default=6)
+parser.add_argument("--num_blocks", "-nb", type=int, help="number of transformer blocks", default=6)
 parser.add_argument("--lr", type=float, help="learning rate", default=1e-5)
 parser.add_argument("--wd", type=float, help="weight decay", default=1e-2)
 parser.add_argument("--batch_size", "-bs", type=int, help="batch size", default=16)
@@ -28,6 +29,7 @@ args = parser.parse_args()
 
 config = Config(**args.__dict__)
 
+pprint(config.__dict__)
 if __name__ == "__main__":
     if args.w:
         train_w(config)

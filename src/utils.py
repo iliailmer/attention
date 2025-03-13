@@ -27,14 +27,15 @@ def tinyshakespeare_batch(data, block_size, batch_size, tokenizer):
 
 
 def tinyshakespeare_batch_words(data, block_size, batch_size, tokenizer):
-    data = data.replace("\n", " ")
+    # data = data.replace("\n", " ")
     x = []
     y = []
-    words = data.split()
+    words = tokenizer._tokenize(data)
+
     _idx = torch.randint(len(words) - block_size, size=(batch_size,))
     for i in _idx:
-        x_str = " ".join(words[i : i + block_size])
-        y_str = " ".join(words[i + 1 : i + 1 + block_size])
+        x_str = "".join(words[i : i + block_size])
+        y_str = "".join(words[i + 1 : i + 1 + block_size])
         x.append(tokenizer.encode(x_str))
         y.append(tokenizer.encode(y_str))
     return torch.stack(x), torch.stack(y)
