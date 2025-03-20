@@ -32,7 +32,8 @@ def train_w(config: Config):
             num_blocks=config.num_blocks,
         )
     model = model.to(config.device)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=config.lr, weight_decay=config.wd)
+    optimizer = Muon(model.parameters(), lr=config.lr, weight_decay=config.wd)
+    # torch.optim.AdamW(model.parameters(), lr=config.lr, weight_decay=config.wd)
 
     data_train, data_val = text[: int(0.9 * len(text))], text[int(0.9 * len(text)) :]
 
@@ -98,7 +99,9 @@ def train_c(config: Config):
             num_blocks=config.num_blocks,
         )
     model = model.to(config.device)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=config.lr, weight_decay=config.wd)
+    optimizer = Muon(model.parameters(), lr=config.lr, weight_decay=config.wd)
+
+    # torch.optim.AdamW(model.parameters(), lr=config.lr, weight_decay=config.wd)
 
     data_train, data_val = text[: int(0.9 * len(text))], text[int(0.9 * len(text)) :]
 

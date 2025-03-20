@@ -9,7 +9,7 @@ def newtonschulz5(G, steps=5, eps=1e-7):
     # see listing in https://kellerjordan.github.io/posts/muon/
     assert G.ndim == 2
     a, b, c = (3.4445, -4.7750, 2.0315)
-    X = G.bfloat16()
+    X = G  # .bfloat16()
     X /= X.norm() + eps
     if G.size(0) > G.size(1):
         X = X.T
@@ -27,7 +27,7 @@ class Muon(Optimizer):
         defaults = dict(lr=lr, weight_decay=weight_decay, momentum=momentum, nesterov=nesterov, ortho_steps=ortho_steps)
         super().__init__(params, defaults)
 
-    def step(self):
+    def step(self, closure=None):
         for group in self.param_groups:
             lr = group["lr"]
             momentum = group["momentum"]
