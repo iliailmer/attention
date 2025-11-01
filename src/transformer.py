@@ -1,162 +1,119 @@
 import math
-from typing import Optional
 
-import torch  # noqa: F401
+import torch
 from torch import Tensor, nn
 from torch.nn import functional as F
 
 
-# NOTE: Batch x SentenceLength => Embedding => Batch x SentenceLength x EmbeddingSize
-class SelfAttention(nn.Module):
-    """Scaled dot product attention from "Attention is all you need" paper"""
-
-    def __init__(self, embedding_size: int, head_size: int, block_size: int, is_decoder=False) -> None:
+class MultiHeadAttentionEfficient(nn.Module):
+    def __init__(self, embedding_size: int, num_heads: int, block_size: int, is_decoder=False, dropout=0.2) -> None:
         super().__init__()
-        self.query = nn.Linear(embedding_size, head_size, bias=False)
-        self.key = nn.Linear(embedding_size, head_size, bias=False)
-        self.value = nn.Linear(embedding_size, head_size, bias=False)
+        assert embedding_size % num_heads == 0, "embedding_size must be divisible by num_heads"
+
+        self.embedding_size = embedding_size
+        self.num_heads = num_heads
+        self.head_size = embedding_size // num_heads
         self.is_decoder = is_decoder
-        self.register_buffer("tril", torch.tril(torch.ones(block_size, block_size)))  # used in masking)
-        self.dropout = nn.Dropout(0.2)
 
-    def forward(self, x: Tensor, mask: Optional[Tensor] = None) -> Tensor:
-        q = self.query(x)  # B x SL x HS
-        k = self.key(x)  # B x SL x HS
-        v = self.value(x)  # B x SL x HS
-        scores = q @ k.transpose(-2, -1) / math.sqrt(k.shape[-1])  # B x SL x SL
+        self.qkv = nn.Linear(embedding_size, 3 * embedding_size, bias=False)
+        self.proj = nn.Linear(embedding_size, embedding_size)
+        self.dropout = nn.Dropout(dropout)
+        self.attn_dropout = nn.Dropout(dropout)
+
+        if is_decoder:
+            self.register_buffer("tril", torch.tril(torch.ones(block_size, block_size)))
+
+    def forward(self, x: Tensor, mask: Tensor | None = None) -> Tensor:
+        B, T, C = x.shape
+
+        qkv = self.qkv(x)
+        q, k, v = qkv.split(self.embedding_size, dim=-1)
+
+        q = q.view(B, T, self.num_heads, self.head_size).transpose(1, 2)
+        k = k.view(B, T, self.num_heads, self.head_size).transpose(1, 2)
+        v = v.view(B, T, self.num_heads, self.head_size).transpose(1, 2)
+
+        scores = q @ k.transpose(-2, -1) / math.sqrt(self.head_size)
+
         if mask is not None:
-            scores = scores.masked_fill(mask == 0, float("-inf"))
+            scores = scores.masked_fill(mask.unsqueeze(1) == 0, float("-inf"))
         elif self.is_decoder:
-            _, T, _ = k.shape  # B x SL x HS
             scores = scores.masked_fill(self.tril[:T, :T] == 0, float("-inf"))  # pyright: ignore
-        scores = F.softmax(scores, dim=-1)
-        scores = self.dropout(scores)
-        return scores @ v  # NOTE: Batch x SentenceLength x HeadSize
 
+        attn = F.softmax(scores, dim=-1)
+        attn = self.attn_dropout(attn)
 
-class MultiHeadAttention(nn.Module):
-    def __init__(self, embedding_size: int, head_size: int, block_size: int, num_heads: int):
-        super().__init__()
-        self.heads = nn.ModuleList([SelfAttention(embedding_size, head_size, block_size) for _ in range(num_heads)])
-        self.proj = nn.Linear(head_size * num_heads, embedding_size)
-        self.dropout = nn.Dropout(0.2)
+        out = attn @ v
+        out = out.transpose(1, 2).contiguous().view(B, T, C)
 
-    def forward(self, x: Tensor, mask: Optional[Tensor] = None) -> Tensor:
-        x = torch.cat([h(x, mask) for h in self.heads], dim=-1)  # NOTE: Batch x SentenceLength x HeadSize*num_heads
-        x = self.proj(x)  # NOTE: Batch x SentenceLength x embedding_size
-        return self.dropout(x)
+        out = self.proj(out)
+        out = self.dropout(out)
 
-
-class SelfAttentionEncoder(SelfAttention):
-    def __init__(self, embedding_size: int, head_size: int, block_size: int):
-        super().__init__(embedding_size, head_size, block_size, is_decoder=False)
-
-    def forward(self, x: Tensor, mask: Optional[Tensor] = None) -> Tensor:
-        return super().forward(x, mask)
-
-
-class MultiHeadEncoder(nn.Module):
-    def __init__(self, embedding_size: int, head_size: int, block_size: int, num_heads: int):
-        super().__init__()
-        self.heads = nn.ModuleList(
-            [SelfAttentionEncoder(embedding_size, head_size, block_size) for _ in range(num_heads)]
-        )
-        self.proj = nn.Linear(num_heads * head_size, embedding_size)
-        self.dropout = nn.Dropout(0.2)
-
-    def forward(self, x: Tensor, mask: Optional[Tensor] = None) -> Tensor:
-        x = torch.cat([h(x, mask) for h in self.heads], dim=-1)
-        x = self.proj(x)
-        return self.dropout(x)
-
-
-class SelfAttentionDecoder(SelfAttention):
-    def __init__(self, embedding_size: int, head_size: int, block_size: int):
-        super().__init__(embedding_size, head_size, block_size, is_decoder=True)
-
-    def forward(self, x: Tensor, mask: Optional[Tensor] = None) -> Tensor:
-        return super().forward(x, mask)
-
-
-class MultiHeadDecoder(nn.Module):
-    def __init__(self, embedding_size: int, head_size: int, block_size: int, num_heads: int):
-        super().__init__()
-        self.heads = nn.ModuleList(
-            [SelfAttentionDecoder(embedding_size, head_size, block_size) for _ in range(num_heads)]
-        )
-        self.proj = nn.Linear(num_heads * head_size, embedding_size)
-        self.dropout = nn.Dropout(0.2)
-
-    def forward(self, x: Tensor, mask: Optional[Tensor] = None) -> Tensor:
-        x = torch.cat([h(x, mask) for h in self.heads], dim=-1)
-        x = self.proj(x)
-        return self.dropout(x)
+        return out
 
 
 class EncoderBlock(nn.Module):
-    def __init__(self, embedding_size: int, head_size: int, block_size: int, num_enc_heads: int, n_hidden: int = 128):
+    def __init__(self, embedding_size: int, block_size: int, num_heads: int, ffn_hidden_size: int = 512):
         super().__init__()
-        self.encoder = MultiHeadEncoder(embedding_size, head_size, block_size, num_enc_heads)
+        self.attn = MultiHeadAttentionEfficient(embedding_size, num_heads, block_size, is_decoder=False)
         self.ffn = nn.Sequential(
-            nn.Linear(embedding_size, n_hidden),
+            nn.Linear(embedding_size, ffn_hidden_size),
             nn.ReLU(),
-            nn.Linear(n_hidden, embedding_size),
+            nn.Dropout(0.2),
+            nn.Linear(ffn_hidden_size, embedding_size),
+            nn.Dropout(0.2),
         )
-        self.layer_norm = nn.LayerNorm(embedding_size)
+        self.layer_norm_1 = nn.LayerNorm(embedding_size)
+        self.layer_norm_2 = nn.LayerNorm(embedding_size)
 
-    def forward(self, x: Tensor, mask: Optional[Tensor] = None) -> Tensor:
-        x = x + self.encoder(x, mask)
-        x = self.layer_norm(x)
-        x = x + self.ffn(x)
-        x = self.layer_norm(x)
+    def forward(self, x: Tensor, mask: Tensor | None = None) -> Tensor:
+        x = x + self.attn(self.layer_norm_1(x), mask)
+        x = x + self.ffn(self.layer_norm_2(x))
         return x
 
 
 class DecoderBlock(nn.Module):
-    def __init__(self, embedding_size: int, head_size: int, block_size: int, num_heads: int, n_hidden: int = 128):
+    def __init__(self, embedding_size: int, block_size: int, num_heads: int, ffn_hidden_size: int = 512):
         super().__init__()
-        self.decoder = MultiHeadDecoder(embedding_size, head_size, block_size, num_heads)
-        self.mha = MultiHeadAttention(embedding_size, head_size, block_size, num_heads)
+        self.self_attn = MultiHeadAttentionEfficient(embedding_size, num_heads, block_size, is_decoder=True)
+        self.cross_attn = MultiHeadAttentionEfficient(embedding_size, num_heads, block_size, is_decoder=False)
         self.layer_norm_1 = nn.LayerNorm(embedding_size)
         self.layer_norm_2 = nn.LayerNorm(embedding_size)
         self.layer_norm_3 = nn.LayerNorm(embedding_size)
         self.ffn = nn.Sequential(
-            nn.Linear(embedding_size, n_hidden),
+            nn.Linear(embedding_size, ffn_hidden_size),
             nn.ReLU(),
-            nn.Linear(n_hidden, embedding_size),
+            nn.Dropout(0.2),
+            nn.Linear(ffn_hidden_size, embedding_size),
+            nn.Dropout(0.2),
         )
 
-    def forward(self, x: Tensor, mask: Optional[Tensor] = None, enc_x: Optional[Tensor] = None) -> Tensor:
-        x = x + self.decoder(x, mask)
-        x = self.layer_norm_1(x)
+    def forward(self, x: Tensor, mask: Tensor | None = None, enc_x: Tensor | None = None) -> Tensor:
+        x = x + self.self_attn(self.layer_norm_1(x), mask)
         if enc_x is not None:
-            # NOTE: Decoder cross-attention should NOT concatenate x and enc_x.
-            # Instead, x (query) attends to enc_x (key & value) in MultiHeadAttention
-            # if enc_x is not None:
-            # x_residual = x
-            # x = self.mha(q=x, k=enc_x, v=enc_x)  # Query attends to encoder output
-            # x = self.layer_norm_2(x + x_residual)
-
-            x = torch.cat([x, enc_x], dim=1)
-            x = self.mha(x)
-            x = x + self.layer_norm_2(x)
-        x = x + self.ffn(x)
-        x = self.layer_norm_3(x)
+            x_cat = torch.cat([x, enc_x], dim=1)
+            x = x + self.cross_attn(self.layer_norm_2(x_cat))
+        x = x + self.ffn(self.layer_norm_3(x))
         return x
 
 
 class GPTModel(nn.Module):
     def __init__(
-        self, vocab_size: int, embedding_size: int, head_size: int, block_size: int, num_heads: int, num_blocks: int
+        self,
+        vocab_size: int,
+        embedding_size: int,
+        block_size: int,
+        num_heads: int,
+        num_blocks: int,
+        ffn_hidden_size: int = None,
     ) -> None:
         super().__init__()
-        self.t_emembedding = nn.Embedding(vocab_size, embedding_size)
+        if ffn_hidden_size is None:
+            ffn_hidden_size = 4 * embedding_size
+        self.t_embedding = nn.Embedding(vocab_size, embedding_size)
         self.p_embedding = nn.Embedding(block_size, embedding_size)
         self.decoder_blocks = nn.Sequential(
-            *[
-                DecoderBlock(embedding_size, head_size, block_size, num_heads=num_heads, n_hidden=4 * num_heads)
-                for _ in range(num_blocks)
-            ]
+            *[DecoderBlock(embedding_size, block_size, num_heads, ffn_hidden_size) for _ in range(num_blocks)]
         )
         self.layer_norm = nn.LayerNorm(embedding_size)
         self.final = nn.Linear(embedding_size, vocab_size)
@@ -172,7 +129,7 @@ class GPTModel(nn.Module):
 
     def forward(self, x, targets=None):
         _, T = x.shape
-        x = self.t_emembedding(x) + self.p_embedding(torch.arange(T, device=x.device))
+        x = self.t_embedding(x) + self.p_embedding(torch.arange(T, device=x.device))
         x = self.decoder_blocks(x)
         x = self.layer_norm(x)
         logits = self.final(x)

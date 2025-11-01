@@ -1,35 +1,37 @@
 import torch
 from tqdm.auto import tqdm
 
-from src.tokenization import Tokenizer, TokenizerByWord
-from src.optimizer import Muon
-from src.transformer import GPTModel
-from src.flash_attn import GPTModel as GPTModelFA
-from src.utils import read_data, tinyshakespeare_batch, tinyshakespeare_batch_words
 from src.config import Config
+from src.flash_attn import GPTModel as GPTModelFA
+from src.optimizer import Muon
+from src.tokenization import Tokenizer, TokenizerByWord
+from src.transformer import GPTModel
+from src.utils import read_data, tinyshakespeare_batch, tinyshakespeare_batch_words
 
 
 def train_w(config: Config):
     text = read_data()
     tokenizer = TokenizerByWord(from_text=text)
+    print("Vocab Size:", tokenizer.vocab_size)
 
+    ffn_hidden = config.ffn_multiplier * config.embedding_size
     if config.use_flash:
         model = GPTModelFA(
             vocab_size=tokenizer.vocab_size,
             embedding_size=config.embedding_size,
-            head_size=config.embedding_size // config.num_heads,
             block_size=config.block_size,
             num_heads=config.num_heads,
             num_blocks=config.num_blocks,
+            ffn_hidden_size=ffn_hidden,
         )
     else:
         model = GPTModel(
             vocab_size=tokenizer.vocab_size,
             embedding_size=config.embedding_size,
-            head_size=config.embedding_size // config.num_heads,
             block_size=config.block_size,
             num_heads=config.num_heads,
             num_blocks=config.num_blocks,
+            ffn_hidden_size=ffn_hidden,
         )
     model = model.to(config.device)
     optimizer = Muon(model.parameters(), lr=config.lr, weight_decay=config.wd)
@@ -40,14 +42,15 @@ def train_w(config: Config):
     pbar = tqdm(range(config.n_epochs), leave=None)
 
     model.train()
+    optimizer.zero_grad()
     try:
         for epoch in pbar:
             x, y = tinyshakespeare_batch_words(data_train, config.block_size, config.batch_size, tokenizer)
             x = x.to(config.device)
             y = y.to(config.device)
             out, loss = model(x, y)
-            loss.backward()
-            if epoch % config.accumulate_grad == 0:
+            (loss / config.accumulate_grad).backward()
+            if (epoch + 1) % config.accumulate_grad == 0:
                 optimizer.step()
                 optimizer.zero_grad()
 
@@ -80,23 +83,24 @@ def train_c(config: Config):
     text = read_data()
     tokenizer = Tokenizer(from_text=text)
 
+    ffn_hidden = config.ffn_multiplier * config.embedding_size
     if config.use_flash:
         model = GPTModelFA(
             vocab_size=tokenizer.vocab_size,
             embedding_size=config.embedding_size,
-            head_size=config.embedding_size // config.num_heads,
             block_size=config.block_size,
             num_heads=config.num_heads,
             num_blocks=config.num_blocks,
+            ffn_hidden_size=ffn_hidden,
         )
     else:
         model = GPTModel(
             vocab_size=tokenizer.vocab_size,
             embedding_size=config.embedding_size,
-            head_size=config.embedding_size // config.num_heads,
             block_size=config.block_size,
             num_heads=config.num_heads,
             num_blocks=config.num_blocks,
+            ffn_hidden_size=ffn_hidden,
         )
     model = model.to(config.device)
     optimizer = Muon(model.parameters(), lr=config.lr, weight_decay=config.wd)
@@ -108,14 +112,15 @@ def train_c(config: Config):
     pbar = tqdm(range(config.n_epochs), leave=None)
 
     model.train()
+    optimizer.zero_grad()
     try:
         for epoch in pbar:
             x, y = tinyshakespeare_batch(data_train, config.block_size, config.batch_size, tokenizer)
             x = x.to(config.device)
             y = y.to(config.device)
             out, loss = model(x, y)
-            loss.backward()
-            if epoch % config.accumulate_grad == 0:
+            (loss / config.accumulate_grad).backward()
+            if (epoch + 1) % config.accumulate_grad == 0:
                 optimizer.step()
                 optimizer.zero_grad()
 
@@ -137,9 +142,9 @@ def train_c(config: Config):
                         f"Epoch {epoch} - Training Loss: {loss_dict['train']:.4f} - Val Loss: {loss_dict['val']:.4f}"
                     )
                 model.train()
-        torch.save(model.state_dict(), "model_w.pt")
+        torch.save(model.state_dict(), "model_c.pt")
         config.save("config_c.json")
     except KeyboardInterrupt:
         model.eval()
-        torch.save(model.state_dict(), "model_w.pt")
+        torch.save(model.state_dict(), "model_c.pt")
         config.save("config_c.json")

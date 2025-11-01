@@ -2,8 +2,9 @@ import argparse
 from pprint import pprint
 
 from src.config import Config
-from src.utils import set_seed
 from src.training import train_c, train_w
+from src.utils import set_seed
+
 
 set_seed(42)
 
@@ -28,6 +29,7 @@ parser.add_argument("--use_flash", "-uf", action="store_true", help="use flash a
 args = parser.parse_args()
 
 config = Config(**args.__dict__)
+config.load(args.config)
 
 pprint(config.__dict__)
 if __name__ == "__main__":
@@ -35,3 +37,5 @@ if __name__ == "__main__":
         train_w(config)
     if args.c:
         train_c(config)
+    if not args.c and not args.w:
+        print("Both arguments.c and arguments.w are False!")

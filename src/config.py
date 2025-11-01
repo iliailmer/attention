@@ -16,6 +16,7 @@ class Config:
         num_eval_steps=200,
         accumulate_grad=4,
         use_flash=False,
+        ffn_multiplier=4,
         **kwargs,
     ):
         self.embedding_size = embedding_size
@@ -31,6 +32,7 @@ class Config:
         self.num_eval_steps = num_eval_steps
         self.accumulate_grad = accumulate_grad
         self.use_flash = use_flash
+        self.ffn_multiplier = ffn_multiplier
 
     def save(self, fname: str = "config.json"):
         conf_dict = self.__dict__
@@ -38,7 +40,7 @@ class Config:
             json.dump(conf_dict, f, indent=4)
 
     def load(self, fname: str = "config.json"):
-        with open(fname, "r") as f:
+        with open(fname) as f:
             conf_dict = json.load(f)
         for k, v in conf_dict.items():
             setattr(self, k, v)

@@ -1,11 +1,13 @@
-import torch
 import argparse
 
+import torch
+
 from src.config import Config
+from src.flash_attn import GPTModel as GPTModelFA
 from src.tokenization import Tokenizer, TokenizerByWord
 from src.transformer import GPTModel
-from src.flash_attn import GPTModel as GPTModelFA
 from src.utils import read_data, set_seed
+
 
 set_seed(42)
 config = Config()

@@ -1,14 +1,15 @@
-from typing import Optional
 
+import torch
 from torch import Tensor
 
-SPECIAL_TOKENS = ": $.;',\n!&?-"
+
+SPECIAL_TOKENS = ": $.;',\n!&?- "
 
 
 class Tokenizer:
     """Elementary tokenizer"""
 
-    def __init__(self, from_text: str = "", vocab: Optional[list[str]] = None):
+    def __init__(self, from_text: str = "", vocab: list[str] | None = None):
         if vocab:
             self.vocab = vocab
         else:
@@ -21,7 +22,7 @@ class Tokenizer:
                 raise ValueError("No vocab or text provided")
 
     def encode(self, text: str) -> Tensor:
-        return Tensor([self.stoi[c] for c in text]).long()
+        return torch.tensor([self.stoi[c] for c in text], dtype=torch.long)
 
     def decode(self, tokens) -> str:
         return "".join([self.itos[int(token)] for token in tokens])
@@ -30,23 +31,20 @@ class Tokenizer:
 class TokenizerByWord:
     """Elementary Tokenizer by Word"""
 
-    def __init__(self, from_text: str = "", vocab: Optional[list[str]] = None):
+    def __init__(self, from_text: str = "", vocab: list[str] | None = None):
         if vocab:
             self.vocab = vocab
         else:
             if from_text:
-                self.words = sorted(self._tokenize(from_text))
+                self.words = sorted(list(set(self._tokenize(from_text))))
                 self.vocab_size = len(self.words)
                 self.stoi = {ch: i for i, ch in enumerate(self.words)}
                 self.itos = {i: ch for i, ch in enumerate(self.words)}
             else:
                 raise ValueError("No vocab or text provided")
-        # self.stoi["\n"] = self.vocab_size + 1
-        # self.itos[self.vocab_size + 1] = "\n"
-        # self.vocab_size += 1
 
-        self.stoi["<NONE>"] = self.vocab_size + 1
-        self.itos[self.vocab_size + 1] = "<NONE>"
+        self.stoi["<NONE>"] = self.vocab_size
+        self.itos[self.vocab_size] = "<NONE>"
         self.vocab_size += 1
 
     def _tokenize(self, text: str) -> list[str]:
@@ -69,7 +67,7 @@ class TokenizerByWord:
 
     def encode(self, text: str) -> Tensor:
         text_ = self._tokenize(text)
-        return Tensor([self.stoi.get(c, self.stoi["<NONE>"]) for c in text_]).long()
+        return torch.tensor([self.stoi.get(c, self.stoi["<NONE>"]) for c in text_], dtype=torch.long)
 
     def decode(self, tokens) -> str:
         return "".join([self.itos[int(token)] for token in tokens])
