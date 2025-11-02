@@ -105,7 +105,7 @@ class GPTModel(nn.Module):
         block_size: int,
         num_heads: int,
         num_blocks: int,
-        ffn_hidden_size: int = None,
+        ffn_hidden_size: int | None = None,
     ) -> None:
         super().__init__()
         if ffn_hidden_size is None:

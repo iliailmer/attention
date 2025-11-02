@@ -29,7 +29,13 @@ parser.add_argument("--use_flash", "-uf", action="store_true", help="use flash a
 args = parser.parse_args()
 
 config = Config(**args.__dict__)
-config.load(args.config)
+
+if args.w:
+    config.load("config_w.json")
+elif args.c:
+    config.load("config_c.json")
+elif args.config:
+    config.load(args.config)
 
 pprint(config.__dict__)
 if __name__ == "__main__":

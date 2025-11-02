@@ -28,25 +28,32 @@ elif args.c:
     tokenizer = Tokenizer(from_text=text)
 
 if tokenizer is not None:
+    ffn_hidden = config.ffn_multiplier * config.embedding_size
     if config.use_flash:
         model = GPTModelFA(
             vocab_size=tokenizer.vocab_size,
             embedding_size=config.embedding_size,
-            head_size=config.embedding_size // config.num_heads,
             block_size=config.block_size,
             num_heads=config.num_heads,
             num_blocks=config.num_blocks,
+            ffn_hidden_size=ffn_hidden,
         )
     else:
         model = GPTModel(
             vocab_size=tokenizer.vocab_size,
             embedding_size=config.embedding_size,
-            head_size=config.embedding_size // config.num_heads,
             block_size=config.block_size,
             num_heads=config.num_heads,
             num_blocks=config.num_blocks,
+            ffn_hidden_size=ffn_hidden,
         )
     model = model.to(config.device)
-    model.load_state_dict(torch.load(model_name))
-    context = tokenizer.encode("T'was a night").unsqueeze(0).long().to(config.device)
-    print(tokenizer.decode(model.generate(context, max_new_tokens=500, block_size=config.block_size)[0].tolist()))
+    model.load_state_dict(torch.load(model_name, weights_only=True, map_location=config.device))
+    model.eval()
+    model = torch.compile(model)
+    context = tokenizer.encode("as a night").unsqueeze(0).to(config.device)
+
+    with torch.no_grad():
+        output = model.generate(context, max_new_tokens=500, block_size=config.block_size)
+
+    print(tokenizer.decode(output[0].tolist()))

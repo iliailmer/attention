@@ -43,7 +43,15 @@ def flash_attention(q: Tensor, k: Tensor, v: Tensor, mask=None, is_decoder=False
 
 
 class MultiHeadFlashAttention(nn.Module):
-    def __init__(self, embedding_size: int, num_heads: int, context_size: int, is_decoder=False, flash_block_size=128, dropout=0.2):
+    def __init__(
+        self,
+        embedding_size: int,
+        num_heads: int,
+        context_size: int,
+        is_decoder=False,
+        flash_block_size=128,
+        dropout=0.2,
+    ):
         super().__init__()
         assert embedding_size % num_heads == 0
 
@@ -78,7 +86,7 @@ class MultiHeadFlashAttention(nn.Module):
             k_block = k[:, :, i:end, :]
             v_block = v[:, :, i:end, :]
 
-            scores = q_block @ k_block.transpose(-2, -1) / (self.head_size ** 0.5)
+            scores = q_block @ k_block.transpose(-2, -1) / (self.head_size**0.5)
 
             if mask is not None:
                 scores = scores.masked_fill(mask[:, None, i:end, i:end] == 0, float("-inf"))
@@ -97,8 +105,6 @@ class MultiHeadFlashAttention(nn.Module):
         out = self.dropout(out)
 
         return out
-
-
 
 
 class EncoderBlock(nn.Module):
@@ -154,7 +160,7 @@ class GPTModel(nn.Module):
         block_size: int,
         num_heads: int,
         num_blocks: int,
-        ffn_hidden_size: int = None,
+        ffn_hidden_size: int | None = None,
     ) -> None:
         super().__init__()
         if ffn_hidden_size is None:
@@ -162,10 +168,7 @@ class GPTModel(nn.Module):
         self.t_emembedding = nn.Embedding(vocab_size, embedding_size)
         self.p_embedding = nn.Embedding(block_size, embedding_size)
         self.decoder_blocks = nn.Sequential(
-            *[
-                DecoderBlock(embedding_size, block_size, num_heads, ffn_hidden_size)
-                for _ in range(num_blocks)
-            ]
+            *[DecoderBlock(embedding_size, block_size, num_heads, ffn_hidden_size) for _ in range(num_blocks)]
         )
         self.layer_norm = nn.LayerNorm(embedding_size)
         self.final = nn.Linear(embedding_size, vocab_size)
