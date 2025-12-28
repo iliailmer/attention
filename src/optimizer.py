@@ -23,7 +23,13 @@ def newtonschulz5(G, steps=5, eps=1e-7):
 
 class Muon(Optimizer):
     def __init__(self, params, lr=0.02, weight_decay=0.01, momentum=0.95, nesterov=False, ortho_steps=5):
-        defaults = {"lr": lr, "weight_decay": weight_decay, "momentum": momentum, "nesterov": nesterov, "ortho_steps": ortho_steps}
+        defaults = {
+            "lr": lr,
+            "weight_decay": weight_decay,
+            "momentum": momentum,
+            "nesterov": nesterov,
+            "ortho_steps": ortho_steps,
+        }
         super().__init__(params, defaults)
 
     def step(self, closure=None):
