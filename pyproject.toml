@@ -5,8 +5,10 @@ description = "PyTorch transformer implementation with character and word-level 
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+  "hydra-core>=1.3.2",
   "ipython>=8.32.0",
   "loguru>=0.7.3",
+  "mlflow>=3.8.1",
   "numpy>=2.2.2",
   "scikit-learn>=1.6.1",
   "scipy>=1.15.1",
